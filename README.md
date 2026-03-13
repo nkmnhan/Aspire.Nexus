@@ -1,10 +1,12 @@
 # Aspire.Nexus
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![.NET 9](https://img.shields.io/badge/.NET-9.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/9.0)
-[![Aspire](https://img.shields.io/badge/Aspire-9.2-blueviolet)](https://learn.microsoft.com/en-us/dotnet/aspire/)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/download/dotnet/10.0)
+[![Aspire](https://img.shields.io/badge/Aspire-13.1-blueviolet)](https://learn.microsoft.com/en-us/dotnet/aspire/)
 
 A **configuration-driven** .NET Aspire AppHost that orchestrates your entire dev environment — infrastructure, APIs, and frontend clients — from JSON config. No C# changes needed to add, remove, or toggle services.
+
+---
 
 ## What is .NET Aspire?
 
@@ -54,21 +56,26 @@ Toggle `"Active": true/false` to control what runs. No code changes. No rebuild.
 ## Features
 
 - **Zero-code service management** — add, remove, toggle services from JSON config
-- **Three service types**: Container (databases, cache), DotNet (APIs), Client (Angular, React, Next.js, Vue)
+- **Five service types**: Container, DotNet, Client, NodeJs (Aspire-native), Python (Aspire-native)
+- **Aspire-native Node.js** — npm, yarn, or pnpm with automatic install, health checks, and dashboard integration
+- **Aspire-native Python** — virtual environment support, pip install, and full dashboard lifecycle
+- **Startup validation** — misconfigure a service? Get a clear error message, not a crash
 - **Infrastructure persistence** — docker-compose keeps your databases alive after Aspire stops
 - **Reuse existing containers** — already running MongoDB from docker-compose? Aspire.Nexus reuses it
 - **Auto pre-build** — builds your .NET solution before Aspire starts
-- **Auto npm install** — custom install commands per frontend (e.g. `npm install --force --legacy-peer-deps`)
+- **Auto dependency install** — npm install, pip install, or custom commands per service
 - **Rebuild on restart** — restart a service from the Aspire dashboard, it rebuilds automatically
-- **HTTPS support** — per-service certificate configuration
+- **HTTPS support** — PEM or PFX certificates per service, or HTTPS flag for client dev servers
 - **User secrets** — passwords, paths, and certs stay out of source control
-- **Windows-ready** — handles `npm.cmd` resolution, IPv4 binding, and more
+- **Cross-platform** — resolves `npm.cmd`/`npx.cmd` on Windows automatically via PATH lookup
 
 ## Prerequisites
 
-- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop)
 - Node.js (for frontend clients)
+
+---
 
 ## Quick Start
 
@@ -96,14 +103,17 @@ START-ASPIRE.cmd
 ```
 
 This will:
-1. Start your infrastructure via docker-compose (databases, cache, messaging)
-2. Build your .NET projects
-3. Install frontend dependencies
-4. Launch the Aspire dashboard
+1. **Validate** your configuration (catches errors before anything starts)
+2. **Start infrastructure** via docker-compose (databases, cache, messaging)
+3. **Build** your .NET projects
+4. **Install** frontend dependencies
+5. **Launch** the Aspire dashboard with all services
 
 ### 4. Open the dashboard
 
 Navigate to **http://localhost:15178** to see all your services, logs, and traces.
+
+---
 
 ## How It Works
 
@@ -115,6 +125,8 @@ Navigate to **http://localhost:15178** to see all your services, logs, and trace
                    +------+------+
                    | Aspire.Nexus |
                    +------+------+
+                          |
+     Phase 0: Validate config (fail fast with clear errors)
                           |
           +---------------+---------------+
           |               |               |
@@ -134,8 +146,12 @@ Navigate to **http://localhost:15178** to see all your services, logs, and trace
 | Type | What it runs | Example | Managed By |
 |------|-------------|---------|------------|
 | `Container` | Infrastructure services | PostgreSQL, MongoDB, Redis, RabbitMQ, Elasticsearch | docker-compose |
-| `DotNet` | .NET backend APIs | Your .csproj microservices | Aspire |
-| `Client` | Frontend dev servers | Angular, React, Next.js, Vue apps via npm | Aspire |
+| `DotNet` | .NET backend APIs and workers | Your .csproj microservices | Aspire |
+| `NodeJs` | Node.js apps via npm/yarn/pnpm | React, Next.js, Vue, Angular (Aspire-native lifecycle) | Aspire |
+| `Python` | Python apps and APIs | FastAPI, Flask, Django (Aspire-native lifecycle) | Aspire |
+| `Client` | Any other dev server | PHP, Go, Ruby, or custom commands (generic `AddExecutable`) | Aspire |
+
+> **When to use `NodeJs` vs `Client`:** Use `NodeJs` for any npm/yarn/pnpm project — Aspire manages the full lifecycle (install, start, health checks, dashboard). Use `Client` only for non-JavaScript projects (PHP, Go, Ruby) or when you need a fully custom launch command.
 
 ### Why docker-compose for infrastructure?
 
@@ -146,6 +162,8 @@ Aspire.Nexus delegates infrastructure to docker-compose instead:
 - Containers appear **grouped** in Docker Desktop (easy to manage)
 - If containers are **already running**, they're reused — no duplicates
 - Volumes keep your data safe across restarts
+
+---
 
 ## Configuration Guide
 
@@ -207,8 +225,12 @@ $secrets = [ordered]@{
         "Port": 5000,
         "Active": true,
         "Certificate": {
-          "Path": "certs/aspnetapp.pfx",
-          "Password": "certpass"
+          "Path": "certs/localhost.pem",
+          "KeyPath": "certs/localhost-key.pem"
+        },
+        "EnvironmentVariables": {
+          "ConnectionStrings__OrderDb": "Host=localhost;Database=orders;Username=dev;Password=secret",
+          "IdentityUrl": "https://localhost:5001"
         }
       },
       "shop-web": {
@@ -221,10 +243,21 @@ $secrets = [ordered]@{
         "DevCommand": "npm run start"
       },
       "store-portal": {
-        "Type": "Client",
+        "Type": "NodeJs",
         "Group": "Frontend/Web",
+        "Https": true,
         "WorkingDirectory": "C:\\YourProject\\src\\store-portal",
+        "ScriptName": "dev",
         "Port": 3000,
+        "Active": true
+      },
+      "ml-service": {
+        "Type": "Python",
+        "Group": "Backend/AI",
+        "WorkingDirectory": "C:\\YourProject\\src\\ml-service",
+        "ScriptPath": "app.py",
+        "VirtualEnvironmentPath": ".venv",
+        "Port": 8000,
         "Active": true
       }
     }
@@ -232,75 +265,287 @@ $secrets = [ordered]@{
 }
 ```
 
+---
+
 ### Service Properties Reference
 
-#### Common (all types)
+#### Common (all service types)
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `Type` | `DotNet` \| `Client` \| `Container` | Yes | Service type |
-| `Port` | int | Yes | Host port |
-| `Active` | bool | No | Include in the run (default: `false`) |
-| `Group` | string | No | Display group for console output |
-| `EnvironmentVariables` | dict | No | Key-value env vars |
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `Type` | `DotNet` \| `NodeJs` \| `Python` \| `Client` \| `Container` | Yes | — | What kind of service this is |
+| `Active` | bool | No | `false` | Set `true` to include in the run |
+| `Port` | int | No | — | Host port (required for Client, optional for DotNet/Container) |
+| `Group` | string | No | — | Display group in console output (e.g. "Backend", "Frontend") |
+| `Https` | bool | No | `false` | Mark as HTTPS without a certificate (for dev servers that handle TLS themselves) |
+| `EnvironmentVariables` | object | No | `{}` | Key-value env vars injected into the service |
 
 #### DotNet
 
+For .NET APIs and background workers.
+
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `ProjectPath` | string | Yes | Path to `.csproj` |
-| `SolutionPath` | string | No | Path to `.sln` — builds solution instead of individual project |
-| `Certificate` | object | No | `{ Path, Password }` — enables HTTPS |
+| `ProjectPath` | string | **Yes** | Path to `.csproj` file |
+| `SolutionPath` | string | No | Path to `.sln` — builds the solution instead of individual project |
+| `Certificate` | object | No | HTTPS certificate — see [Certificate Config](#certificate-config) |
+
+> **Background workers**: If your worker uses `WebApplication.CreateBuilder` but has no endpoint, omit `Port`. Aspire.Nexus assigns an ephemeral port automatically so multiple workers don't fight over the default port 5000.
 
 #### Client
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `WorkingDirectory` | string | Yes | Path to frontend project root |
-| `InstallCommand` | string | No | Custom install (default: `npm install`) |
-| `DevCommand` | string | No | Custom dev server (default: `npm run dev`) |
+For frontend dev servers (React, Angular, Vue, Next.js, etc.).
 
-#### Frontend Framework Examples
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `WorkingDirectory` | string | **Yes** | — | Path to frontend project root |
+| `Port` | int | **Yes** | — | Port the dev server listens on |
+| `InstallCommand` | string | No | `npm install` | Custom install command |
+| `DevCommand` | string | No | `npm run dev` | Custom dev server command |
+| `Https` | bool | No | `false` | Set `true` if your dev server runs HTTPS (e.g. Vite with TLS) |
 
-Next.js, React, Angular, Vue — all work out of the box. Just set the right `DevCommand` and `Port`:
+> **Tip:** If your framework uses the defaults (`npm install` + `npm run dev`), omit `InstallCommand` and `DevCommand` entirely.
 
-| Framework | DevCommand | Default Port | InstallCommand |
-|-----------|-----------|--------------|----------------|
-| **Next.js** | `npm run dev` (default) | 3000 | `npm install` (default) |
-| **React** (Create React App) | `npm run start` | 3000 | `npm install` |
-| **React** (Vite) | `npm run dev` (default) | 5173 | `npm install` |
-| **Angular** | `npm run start` | 4200 | `npm install --force --legacy-peer-deps` |
-| **Vue** (Vite) | `npm run dev` (default) | 5173 | `npm install` |
+**Framework cheat sheet (Client type):**
 
-> **Tip:** If your framework uses the defaults (`npm install` + `npm run dev`), you can omit `InstallCommand` and `DevCommand` entirely — Aspire.Nexus uses those defaults automatically.
+| Framework | DevCommand | Port | InstallCommand |
+|-----------|-----------|------|----------------|
+| **PHP** (Laravel) | `php artisan serve` | 8000 | `composer install` |
+| **Go** (Air) | `air` | 8080 | — |
+| **Ruby** (Rails) | `rails server` | 3000 | `bundle install` |
+
+> **JavaScript frameworks?** Use the `NodeJs` type instead — see [NodeJs (Aspire-native)](#nodejs-aspire-native) above.
+
+#### NodeJs (Aspire-native)
+
+For Node.js applications managed via npm, yarn, or pnpm. Uses Aspire's native `AddJavaScriptApp` — Aspire handles the full lifecycle including dependency install, startup, health checks, and dashboard integration.
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `WorkingDirectory` | string | **Yes** | — | Path to npm project root (must contain `package.json`) |
+| `Port` | int | **Yes** | — | Port the app listens on |
+| `ScriptName` | string | No | `start` | npm script to run (e.g. "dev", "start", "serve") |
+| `PackageManager` | string | No | `npm` | Package manager: `npm`, `yarn`, or `pnpm` |
+
+> **Install is automatic.** Aspire runs the package manager's install command before starting. You don't need `InstallCommand` for NodeJs services.
+
+**Examples:**
+
+```json
+// Next.js with npm (simplest — just 4 properties)
+{
+  "Type": "NodeJs",
+  "WorkingDirectory": "C:\\src\\my-next-app",
+  "Port": 3000,
+  "Active": true
+}
+
+// Vite React with yarn and custom script
+{
+  "Type": "NodeJs",
+  "WorkingDirectory": "C:\\src\\my-react-app",
+  "ScriptName": "dev",
+  "PackageManager": "yarn",
+  "Port": 5173,
+  "Active": true
+}
+
+// Angular with pnpm
+{
+  "Type": "NodeJs",
+  "WorkingDirectory": "C:\\src\\my-angular-app",
+  "ScriptName": "start",
+  "PackageManager": "pnpm",
+  "Port": 4200,
+  "Active": true
+}
+```
+
+#### Python (Aspire-native)
+
+For Python applications. Uses Aspire's native `AddPythonApp` — Aspire manages the Python process lifecycle, virtual environment activation, and dashboard integration.
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `WorkingDirectory` | string | **Yes** | — | Path to Python project root |
+| `Port` | int | **Yes** | — | Port the app listens on |
+| `ScriptPath` | string | **Yes** | — | Entry-point script relative to WorkingDirectory (e.g. `app.py`) |
+| `VirtualEnvironmentPath` | string | No | `.venv` | Path to virtual environment directory relative to WorkingDirectory |
+| `InstallCommand` | string | No | `pip install -r requirements.txt` | Dependency install command |
+
+> **Virtual environment:** Aspire defaults to `.venv` in the project directory. Set `VirtualEnvironmentPath` only if your venv is in a different location. Run `python -m venv .venv` in your project to create one.
+
+**Examples:**
+
+```json
+// FastAPI app with default .venv
+{
+  "Type": "Python",
+  "WorkingDirectory": "C:\\src\\my-fastapi-app",
+  "ScriptPath": "main.py",
+  "Port": 8000,
+  "Active": true
+}
+
+// Flask app with custom venv location
+{
+  "Type": "Python",
+  "WorkingDirectory": "C:\\src\\my-flask-app",
+  "ScriptPath": "app.py",
+  "VirtualEnvironmentPath": "venv",
+  "Port": 5000,
+  "Active": true,
+  "EnvironmentVariables": {
+    "FLASK_ENV": "development",
+    "FLASK_DEBUG": "1"
+  }
+}
+
+// Django app
+{
+  "Type": "Python",
+  "WorkingDirectory": "C:\\src\\my-django-app",
+  "ScriptPath": "manage.py",
+  "Port": 8000,
+  "Active": true,
+  "EnvironmentVariables": {
+    "DJANGO_SETTINGS_MODULE": "myapp.settings.dev"
+  }
+}
+```
+
+#### Client (generic fallback)
+
+For dev servers that aren't Node.js or Python — PHP, Go, Ruby, or anything with a custom launch command. Uses `AddExecutable` under the hood.
+
+> **Prefer `NodeJs` type** for JavaScript/TypeScript projects. It provides Aspire-native lifecycle management that `Client` doesn't.
 
 #### Container (fallback when no docker-compose)
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `Image` | string | Yes | Docker image name |
-| `Tag` | string | No | Image tag (default: `latest`) |
-| `TargetPort` | int | No | Container port (default: same as `Port`) |
-| `AdditionalPorts` | list | No | Extra port mappings `[{ Port, TargetPort }]` |
-| `Volumes` | dict | No | Volume mounts `{ "volume-name": "/container/path" }` |
-| `Args` | list | No | Container command arguments |
+For infrastructure services managed directly by Aspire (only used when docker-compose is not configured).
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `Image` | string | **Yes** | — | Docker image name |
+| `Tag` | string | No | `latest` | Image tag |
+| `TargetPort` | int | No | same as `Port` | Container-side port |
+| `AdditionalPorts` | list | No | `[]` | Extra port mappings `[{ Port, TargetPort }]` |
+| `Volumes` | object | No | `{}` | Volume mounts `{ "volume-name": "/container/path" }` |
+| `Args` | list | No | `[]` | Container command arguments |
+
+#### Certificate Config
+
+Two formats supported:
+
+**PEM (recommended):**
+```json
+{
+  "Certificate": {
+    "Path": "certs/localhost.pem",
+    "KeyPath": "certs/localhost-key.pem"
+  }
+}
+```
+
+**PFX:**
+```json
+{
+  "Certificate": {
+    "Path": "certs/aspnetapp.pfx",
+    "Password": "certpass"
+  }
+}
+```
+
+---
+
+### Environment Variables
+
+Aspire.Nexus injects environment variables at three levels:
+
+| Level | Applies to | Set in | Example |
+|-------|-----------|--------|---------|
+| **ASP.NET defaults** | DotNet services only | `AppHost.Environment` | `ASPNETCORE_ENVIRONMENT`, `Logging__LogLevel__Default` |
+| **Global extras** | All service types | `AppHost.Environment.ExtraVariables` | Shared API keys, feature flags |
+| **Per-service** | That service only | `Services.<name>.EnvironmentVariables` | Connection strings, service URLs |
+
+Per-service variables override global variables when they share the same key.
+
+**Common pattern — connection strings:**
+```json
+{
+  "EnvironmentVariables": {
+    "ConnectionStrings__MyDb": "Host=localhost;Port=5432;Database=mydb;Username=dev;Password=secret",
+    "ConnectionStrings__rabbitmq": "amqp://guest:guest@localhost:5672/"
+  }
+}
+```
+
+---
+
+## Startup Validation
+
+Aspire.Nexus validates your configuration before starting anything. If something is wrong, you get a clear message:
+
+```
+Configuration errors found:
+  - "order-api" (DotNet): "ProjectPath" is required.
+  - "shop-web" (Client): "WorkingDirectory" is required.
+  - "shop-web" (Client): "Port" is required for frontend dev servers.
+  - "cache" (Container): "Image" is required.
+Fix these in your user secrets (setup-secrets.cmd) and try again.
+```
+
+No more cryptic `NullReferenceException` stack traces.
+
+---
 
 ## Project Structure
 
 ```
 Aspire.Nexus/
-├── Program.cs              → entry point — runs phases, starts Aspire
-├── ServiceConfig.cs        → configuration models
-├── ServiceRegistrar.cs     → registers services with Aspire
-├── PreRunPhases.cs         → docker-compose, dotnet build, npm install
-├── ProcessRunner.cs        → cross-platform process execution
-├── BuildLogger.cs          → colored console output
-├── START-ASPIRE.cmd        → launch script
-├── setup-secrets.cmd/.ps1  → user secrets setup (customize for your project)
-├── appsettings.json        → config schema defaults
+├── Program.cs                          → Entry point: validate → pre-run → register → start
+├── ServiceOrchestrator.cs              → Lifecycle orchestration: validate, pre-run, register, rebuild
+├── GlobalUsings.cs                     → Global using for sub-namespaces
+├── Configuration/                      → Pure data models (JSON DTOs)
+│   ├── AppHostConfig.cs                → Top-level config + ServiceType enum
+│   ├── ServiceDef.cs                   → Service definition with per-type properties
+│   ├── InfrastructureConfig.cs         → Docker Compose settings
+│   ├── ServiceEnvironmentConfig.cs     → Global environment variables
+│   ├── CertificateConfig.cs            → PEM/PFX certificate settings
+│   └── PortMapping.cs                  → Container port mappings
+├── Handlers/                           → Strategy pattern — one file per framework
+│   ├── IServiceHandler.cs              → Interface + RegistrationContext record
+│   ├── ServiceHandlerBase.cs           → Abstract base with shared validation/install helpers
+│   ├── DotNetHandler.cs                → dotnet build, AddProject, certificates
+│   ├── NodeJsHandler.cs                → AddJavaScriptApp, WithNpm/Yarn/Pnpm
+│   ├── PythonHandler.cs                → AddPythonApp, venv pip, WithVirtualEnvironment
+│   ├── ClientHandler.cs                → AddExecutable, generic commands
+│   └── ContainerHandler.cs             → AddContainer, ports, volumes, args
+├── Infrastructure/                     → Cross-cutting utilities
+│   ├── ProcessRunner.cs                → Cross-platform process execution + PATH resolution
+│   ├── BuildLogger.cs                  → Colored console output
+│   └── ResourceBuilderExtensions.cs    → Fluent extensions for endpoints, certs, env vars
+├── START-ASPIRE.cmd                    → Launch script (double-click to start)
+├── setup-secrets.cmd/.ps1              → User secrets setup (customize for your project)
+├── appsettings.json                    → Config schema defaults (empty — real config in user secrets)
 └── Properties/
-    └── launchSettings.json → dashboard ports (15178 / 17178)
+    └── launchSettings.json             → Dashboard ports (15178 / 17178)
 ```
+
+### Architecture
+
+Each service type is self-contained in a single handler class implementing `IServiceHandler`:
+
+| Handler | Validate | Register | PreRun | Rebuild on Restart |
+|---------|----------|----------|--------|--------------------|
+| `DotNetHandler` | ProjectPath, cert | `AddProject` | `dotnet build` (solution-dedup) | `dotnet build` (single) |
+| `NodeJsHandler` | WorkingDirectory, Port | `AddJavaScriptApp` | — (Aspire handles) | — (Aspire handles) |
+| `PythonHandler` | WorkingDirectory, ScriptPath, Port | `AddPythonApp` | `pip install` (venv-aware) | Re-run install |
+| `ClientHandler` | WorkingDirectory, Port | `AddExecutable` | Install command | Re-run install |
+| `ContainerHandler` | Image | `AddContainer` | — | — |
+
+Adding a new framework (e.g. Go, Ruby) = create one file in `Handlers/` and register it in `ServiceOrchestrator.Handlers`.
 
 ## Aspire Dashboard
 
@@ -309,15 +554,24 @@ Aspire.Nexus/
 | http | http://localhost:15178 |
 | https | https://localhost:17178 |
 
+---
+
 ## Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| Aspire exits immediately | Run `START-ASPIRE.cmd` — it pauses on exit so you can read the error |
-| `npm` not found | Handled automatically — wraps through `cmd.exe /c` on Windows |
-| Infrastructure not starting | Ensure Docker Desktop is running and `DockerComposePath` in secrets is correct |
-| Port already in use | Check Docker Desktop or Task Manager for existing instances |
-| Data lost on shutdown | Infrastructure uses docker-compose with persistent volumes — containers survive Aspire shutdown |
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| **Configuration error on startup** | Missing required property | Read the error message — it tells you exactly which service and property |
+| **Aspire exits immediately** | Build failure or config error | Run `START-ASPIRE.cmd` — it pauses on exit so you can read the error |
+| **`npm` not found on Windows** | npm not in PATH | Install Node.js and restart your terminal. Aspire.Nexus resolves `npm.cmd` via PATH automatically |
+| **Python app can't find modules** | venv not activated | Set `VirtualEnvironmentPath` (e.g. `.venv`). Run `python -m venv .venv && pip install -r requirements.txt` first |
+| **NodeJs install fails** | Wrong package manager | Set `PackageManager` to `yarn` or `pnpm` if your project uses a lock file other than `package-lock.json` |
+| **Infrastructure not starting** | Docker not running | Ensure Docker Desktop is running and `DockerComposePath` in secrets is correct |
+| **Port already in use** | Previous instance still running | Check Docker Desktop or Task Manager for existing instances |
+| **Data lost on shutdown** | Using Aspire-managed containers | Switch to docker-compose — containers persist. See [Why docker-compose?](#why-docker-compose-for-infrastructure) |
+| **Two workers crash on port 5000** | Both bind Kestrel's default | Omit `Port` for workers — Aspire.Nexus assigns ephemeral ports automatically |
+| **HTTPS not working for frontend** | Aspire shows HTTP URL | Set `"Https": true` on the Client service (dev server must handle TLS itself) |
+
+---
 
 ## Comparison
 
@@ -325,10 +579,15 @@ Aspire.Nexus/
 |---|---|---|
 | Add a service | Modify C#, rebuild | Add JSON entry |
 | Toggle services | Comment/uncomment code | Set `Active: true/false` |
+| Misconfiguration | NullReferenceException at runtime | Clear validation error at startup |
 | Infrastructure persistence | Containers destroyed on stop | docker-compose keeps them alive |
+| Connection strings | Hardcoded in C# or user secrets per project | Per-service `EnvironmentVariables` in one place |
 | Sensitive config | In source code | In user secrets |
-| Frontend support | Manual `AddExecutable` setup | Built-in with custom install/dev commands |
+| Frontend support | Manual `AddExecutable` setup | Aspire-native Node.js/Python + generic Client fallback |
 | Multiple developers | Everyone uses same services | Each dev configures their own secrets |
+| HTTPS | Manual Kestrel config per project | PEM/PFX certificate config or `Https` flag |
+
+---
 
 ## Contributing
 
