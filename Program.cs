@@ -16,11 +16,11 @@ try
         ?? throw new InvalidOperationException(
             "AppHost configuration is missing. Check appsettings.json and/or user secrets.");
 
-    await PreRunPhases.StartInfrastructureAsync(config, cts.Token);
-    await PreRunPhases.BuildDotNetServicesAsync(config, cts.Token);
-    await PreRunPhases.InstallClientDependenciesAsync(config, cts.Token);
+    ServiceOrchestrator.Validate(config);
 
-    ServiceRegistrar.RegisterServices(builder, config);
+    await ServiceOrchestrator.PreRunAsync(config, cts.Token);
+
+    ServiceOrchestrator.RegisterAll(builder, config, basePath: builder.AppHostDirectory);
 
     builder.Build().Run();
 }
@@ -33,3 +33,8 @@ catch (Exception ex)
     BuildLogger.Error($"[FATAL] {ex.Message}");
     Environment.ExitCode = 1;
 }
+
+// Always pause so double-click users can read output before the window closes.
+BuildLogger.Info("");
+BuildLogger.Info("Press any key to exit...");
+Console.ReadKey(intercept: true);

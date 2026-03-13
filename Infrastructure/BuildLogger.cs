@@ -1,4 +1,4 @@
-namespace Aspire.Nexus;
+namespace Aspire.Nexus.Infrastructure;
 
 public static class BuildLogger
 {
