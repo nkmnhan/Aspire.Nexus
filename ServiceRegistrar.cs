@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 
@@ -10,74 +9,34 @@ public static class ServiceRegistrar
         IDistributedApplicationBuilder builder,
         AppHostConfig config)
     {
-        var activeServices = config.Services
+        var active = config.Services
             .Where(kvp => kvp.Value.Active)
             .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
-        if (activeServices.Count == 0)
+        if (active.Count == 0)
         {
             PrintAvailableServices(config.Services);
             return;
         }
 
-        foreach (var (name, def) in activeServices)
-            RegisterService(builder, name, def, config.Environment);
+        var containerServices = active.Where(kvp => kvp.Value.Type == ServiceType.Container).ToDictionary();
+        var dotnetServices = active.Where(kvp => kvp.Value.Type == ServiceType.DotNet).ToDictionary();
+        var clientServices = active.Where(kvp => kvp.Value.Type == ServiceType.Client).ToDictionary();
 
-        SubscribeRebuildOnRestart(builder, activeServices);
+        // Infrastructure first, then backends, then frontends
+        foreach (var (name, def) in containerServices)
+            RegisterContainerService(builder, name, def);
+
+        foreach (var (name, def) in dotnetServices)
+            RegisterDotNetService(builder, name, def, config.Environment);
+
+        foreach (var (name, def) in clientServices)
+            RegisterClientService(builder, name, def);
+
+        SubscribeRebuildOnRestart(builder, dotnetServices);
     }
 
-    public static async Task PreBuildActiveServicesAsync(
-        AppHostConfig config,
-        CancellationToken ct = default)
-    {
-        var activeServices = config.Services
-            .Where(kvp => kvp.Value.Active)
-            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-
-        if (activeServices.Count == 0)
-            return;
-
-        // Build distinct solutions first
-        var solutions = activeServices.Values
-            .Where(d => !string.IsNullOrEmpty(d.SolutionPath))
-            .Select(d => d.SolutionPath!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        foreach (var sln in solutions)
-        {
-            BuildLogger.Info($"[PRE-BUILD] Building solution: {sln}");
-            var success = await RunDotnetBuildAsync(sln, ct);
-            if (!success)
-                throw new InvalidOperationException(
-                    $"Solution build failed: {sln}. Fix build errors before starting the host.");
-        }
-
-        // Build individual projects that have no solution
-        var projectOnly = activeServices
-            .Where(kvp => string.IsNullOrEmpty(kvp.Value.SolutionPath))
-            .ToList();
-
-        var failed = new List<string>();
-        foreach (var (name, def) in projectOnly)
-        {
-            BuildLogger.Info($"[PRE-BUILD] Building project: {name}");
-            var success = await RunDotnetBuildAsync(def.ProjectPath, ct);
-            if (!success)
-                failed.Add(name);
-        }
-
-        if (failed.Count > 0)
-        {
-            BuildLogger.Error($"[PRE-BUILD FAILED] {string.Join(", ", failed)}");
-            throw new InvalidOperationException(
-                $"Pre-build failed for: {string.Join(", ", failed)}. Fix build errors before starting the host.");
-        }
-
-        BuildLogger.Success("[PRE-BUILD OK] All active services built successfully.");
-    }
-
-    private static void RegisterService(
+    private static void RegisterDotNetService(
         IDistributedApplicationBuilder builder,
         string serviceName,
         ServiceDef def,
@@ -85,7 +44,7 @@ public static class ServiceRegistrar
     {
         var url = $"{def.Scheme}://localhost:{def.Port}";
 
-        var project = builder.AddProject(serviceName, def.ProjectPath, options =>
+        var project = builder.AddProject(serviceName, def.ProjectPath!, options =>
         {
             options.ExcludeLaunchProfile = true;
         });
@@ -105,25 +64,68 @@ public static class ServiceRegistrar
                    .WithEnvironment("ASPNETCORE_Kestrel__Certificates__Default__Password", def.Certificate.Password);
         }
 
-        // Global extra variables
         foreach (var (key, value) in env.ExtraVariables)
             project.WithEnvironment(key, value);
 
-        // Per-service environment variables (override globals)
         foreach (var (key, value) in def.EnvironmentVariables)
             project.WithEnvironment(key, value);
     }
 
+    private static void RegisterContainerService(
+        IDistributedApplicationBuilder builder,
+        string containerName,
+        ServiceDef def)
+    {
+        BuildLogger.Info($"[CONTAINER] {containerName}: {def.Image}:{def.Tag} -> localhost:{def.Port}");
+
+        var container = builder.AddContainer(containerName, def.Image!, def.Tag);
+
+        // Primary port: Port = host port, TargetPort = container port (defaults to same as Port)
+        var targetPort = def.TargetPort ?? def.Port;
+        container.WithEndpoint(port: def.Port, targetPort: targetPort, name: containerName, isProxied: false);
+
+        // Additional ports (e.g. RabbitMQ management UI on 15672)
+        foreach (var mapping in def.AdditionalPorts)
+            container.WithEndpoint(port: mapping.Port, targetPort: mapping.TargetPort, name: $"{containerName}-{mapping.Port}", isProxied: false);
+
+        foreach (var (key, value) in def.EnvironmentVariables)
+            container.WithEnvironment(key, value);
+
+        foreach (var (hostPath, containerPath) in def.Volumes)
+            container.WithBindMount(hostPath, containerPath);
+
+        foreach (var arg in def.Args)
+            container.WithArgs(arg.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static void RegisterClientService(
+        IDistributedApplicationBuilder builder,
+        string clientName,
+        ServiceDef def)
+    {
+        var devCmd = def.ResolvedDevCommand;
+        var label = FormatLabel(devCmd, def.DevCommand);
+        BuildLogger.Info($"[CLIENT] {clientName}: {label} -> http://localhost:{def.Port}");
+
+        var (command, args) = ProcessRunner.ParseCommand(devCmd);
+
+        var app = builder.AddExecutable(clientName, command, def.WorkingDirectory!, args.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .WithHttpEndpoint(port: def.Port, targetPort: def.Port, name: "http", isProxied: false);
+
+        foreach (var (key, value) in def.EnvironmentVariables)
+            app.WithEnvironment(key, value);
+    }
+
     private static void SubscribeRebuildOnRestart(
         IDistributedApplicationBuilder builder,
-        Dictionary<string, ServiceDef> activeServices)
+        Dictionary<string, ServiceDef> dotnetServices)
     {
         var startedOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         builder.Eventing.Subscribe<BeforeResourceStartedEvent>(async (@event, ct) =>
         {
             var resourceName = @event.Resource.Name;
-            if (!activeServices.ContainsKey(resourceName))
+            if (!dotnetServices.ContainsKey(resourceName))
                 return;
 
             if (startedOnce.Add(resourceName))
@@ -132,10 +134,10 @@ public static class ServiceRegistrar
                 return;
             }
 
-            var def = activeServices[resourceName];
+            var def = dotnetServices[resourceName];
             BuildLogger.Info($"[BUILD] Rebuilding {resourceName}...");
 
-            var success = await RunDotnetBuildAsync(def.ProjectPath, ct);
+            var success = await ProcessRunner.RunAsync("dotnet", $"build \"{def.ProjectPath}\" -c Debug", ct: ct);
             if (!success)
                 throw new InvalidOperationException(
                     $"Build failed for {resourceName}. Fix build errors before restarting.");
@@ -144,54 +146,29 @@ public static class ServiceRegistrar
         });
     }
 
-    private static async Task<bool> RunDotnetBuildAsync(string path, CancellationToken ct)
-    {
-        using var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            Arguments = $"build \"{path}\" -c Debug",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        });
-
-        if (process is null)
-            return false;
-
-        await using var reg = ct.Register(() =>
-        {
-            try
-            {
-                if (!process.HasExited)
-                    process.Kill(entireProcessTree: true);
-            }
-            catch { /* already exited */ }
-        });
-
-        var outputTask = StreamLinesAsync(process.StandardOutput, line => BuildLogger.Info($"  {line}"), ct);
-        var errorTask = StreamLinesAsync(process.StandardError, line => BuildLogger.Error($"  {line}"), ct);
-
-        await Task.WhenAll(outputTask, errorTask);
-        await process.WaitForExitAsync(ct);
-
-        if (process.ExitCode != 0)
-            BuildLogger.Error($"[BUILD FAILED] exit code {process.ExitCode}");
-
-        return process.ExitCode == 0;
-    }
-
-    private static async Task StreamLinesAsync(
-        StreamReader reader, Action<string> writeLine, CancellationToken ct)
-    {
-        while (await reader.ReadLineAsync(ct) is { } line)
-            writeLine(line);
-    }
+    internal static string FormatLabel(string resolvedCmd, string? userCmd)
+        => userCmd is not null ? $"{resolvedCmd} (custom)" : $"{resolvedCmd} (default)";
 
     private static void PrintAvailableServices(Dictionary<string, ServiceDef> services)
     {
-        BuildLogger.Warn("No active services. Set \"Active\": true in appsettings.json for services to debug.");
+        BuildLogger.Warn("No active services. Set \"Active\": true for services to debug.");
         BuildLogger.Warn("Available:");
-        foreach (var (name, def) in services)
-            BuildLogger.Warn($"  \"{name}\" ({def.Scheme}://localhost:{def.Port})");
+
+        var grouped = services
+            .GroupBy(kvp => kvp.Value.Group ?? "")
+            .OrderBy(g => g.Key);
+
+        foreach (var group in grouped)
+        {
+            if (!string.IsNullOrEmpty(group.Key))
+                BuildLogger.Warn($"  [{group.Key}]");
+
+            var indent = string.IsNullOrEmpty(group.Key) ? "  " : "    ";
+            foreach (var (name, def) in group)
+            {
+                var type = def.Type.ToString().ToLowerInvariant();
+                BuildLogger.Warn($"{indent}\"{name}\" ({type}, http://localhost:{def.Port})");
+            }
+        }
     }
 }

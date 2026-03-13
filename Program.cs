@@ -12,13 +12,12 @@ try
 {
     var builder = DistributedApplication.CreateBuilder(args);
 
-    // User secrets are automatically loaded by the builder in Development environment.
-    // Use: dotnet user-secrets set "AppHost:Services:my-api:Certificate:Password" "my-secret"
     var config = builder.Configuration.GetSection("AppHost").Get<AppHostConfig>()
         ?? throw new InvalidOperationException(
             "AppHost configuration is missing. Check appsettings.json and/or user secrets.");
 
-    await ServiceRegistrar.PreBuildActiveServicesAsync(config, cts.Token);
+    await PreRunPhases.BuildDotNetServicesAsync(config, cts.Token);
+    await PreRunPhases.InstallClientDependenciesAsync(config, cts.Token);
 
     ServiceRegistrar.RegisterServices(builder, config);
 
