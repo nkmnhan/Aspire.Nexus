@@ -54,7 +54,7 @@ Toggle `"Active": true/false` to control what runs. No code changes. No rebuild.
 ## Features
 
 - **Zero-code service management** — add, remove, toggle services from JSON config
-- **Three service types**: Container (databases, cache), DotNet (APIs), Client (Angular, React, Vue)
+- **Three service types**: Container (databases, cache), DotNet (APIs), Client (Angular, React, Next.js, Vue)
 - **Infrastructure persistence** — docker-compose keeps your databases alive after Aspire stops
 - **Reuse existing containers** — already running MongoDB from docker-compose? Aspire.Nexus reuses it
 - **Auto pre-build** — builds your .NET solution before Aspire starts
@@ -135,7 +135,7 @@ Navigate to **http://localhost:15178** to see all your services, logs, and trace
 |------|-------------|---------|------------|
 | `Container` | Infrastructure services | PostgreSQL, MongoDB, Redis, RabbitMQ, Elasticsearch | docker-compose |
 | `DotNet` | .NET backend APIs | Your .csproj microservices | Aspire |
-| `Client` | Frontend dev servers | Angular, React, Vue apps via npm | Aspire |
+| `Client` | Frontend dev servers | Angular, React, Next.js, Vue apps via npm | Aspire |
 
 ### Why docker-compose for infrastructure?
 
@@ -166,13 +166,19 @@ $secrets = [ordered]@{
     "AppHost:Services:order-api:Port"        = "5000"
     "AppHost:Services:order-api:Active"      = "true"
 
-    # A frontend client
+    # An Angular frontend
     "AppHost:Services:shop-web:Type"             = "Client"
     "AppHost:Services:shop-web:WorkingDirectory" = "C:\YourProject\src\shop-web"
     "AppHost:Services:shop-web:Port"             = "4200"
     "AppHost:Services:shop-web:DevCommand"       = "npm run start"
     "AppHost:Services:shop-web:InstallCommand"   = "npm install --force"
     "AppHost:Services:shop-web:Active"           = "true"
+
+    # A Next.js frontend (defaults: npm install + npm run dev)
+    "AppHost:Services:store-portal:Type"             = "Client"
+    "AppHost:Services:store-portal:WorkingDirectory" = "C:\YourProject\src\store-portal"
+    "AppHost:Services:store-portal:Port"             = "3000"
+    "AppHost:Services:store-portal:Active"           = "true"
 }
 ```
 
@@ -213,6 +219,13 @@ $secrets = [ordered]@{
         "Active": false,
         "InstallCommand": "npm install --force --legacy-peer-deps",
         "DevCommand": "npm run start"
+      },
+      "store-portal": {
+        "Type": "Client",
+        "Group": "Frontend/Web",
+        "WorkingDirectory": "C:\\YourProject\\src\\store-portal",
+        "Port": 3000,
+        "Active": true
       }
     }
   }
@@ -246,6 +259,20 @@ $secrets = [ordered]@{
 | `WorkingDirectory` | string | Yes | Path to frontend project root |
 | `InstallCommand` | string | No | Custom install (default: `npm install`) |
 | `DevCommand` | string | No | Custom dev server (default: `npm run dev`) |
+
+#### Frontend Framework Examples
+
+Next.js, React, Angular, Vue — all work out of the box. Just set the right `DevCommand` and `Port`:
+
+| Framework | DevCommand | Default Port | InstallCommand |
+|-----------|-----------|--------------|----------------|
+| **Next.js** | `npm run dev` (default) | 3000 | `npm install` (default) |
+| **React** (Create React App) | `npm run start` | 3000 | `npm install` |
+| **React** (Vite) | `npm run dev` (default) | 5173 | `npm install` |
+| **Angular** | `npm run start` | 4200 | `npm install --force --legacy-peer-deps` |
+| **Vue** (Vite) | `npm run dev` (default) | 5173 | `npm install` |
+
+> **Tip:** If your framework uses the defaults (`npm install` + `npm run dev`), you can omit `InstallCommand` and `DevCommand` entirely — Aspire.Nexus uses those defaults automatically.
 
 #### Container (fallback when no docker-compose)
 
