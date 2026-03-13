@@ -16,6 +16,7 @@ try
         ?? throw new InvalidOperationException(
             "AppHost configuration is missing. Check appsettings.json and/or user secrets.");
 
+    await PreRunPhases.StartInfrastructureAsync(config, cts.Token);
     await PreRunPhases.BuildDotNetServicesAsync(config, cts.Token);
     await PreRunPhases.InstallClientDependenciesAsync(config, cts.Token);
 

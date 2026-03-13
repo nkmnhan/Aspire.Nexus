@@ -11,3 +11,19 @@ echo.
 cd /d %~dp0
 
 dotnet run --launch-profile http
+echo.
+if %ERRORLEVEL% EQU 0 (
+    echo ========================================
+    echo   Aspire stopped gracefully.
+    echo ========================================
+) else if %ERRORLEVEL% EQU -1073741510 (
+    echo ========================================
+    echo   Aspire stopped (Ctrl+C).
+    echo ========================================
+) else (
+    echo ========================================
+    echo   Aspire exited with error code: %ERRORLEVEL%
+    echo   Check the logs above for details.
+    echo ========================================
+)
+pause

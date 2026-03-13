@@ -3,10 +3,40 @@ namespace Aspire.Nexus;
 public sealed class AppHostConfig
 {
     public ServiceEnvironmentConfig Environment { get; init; } = new();
+    public InfrastructureConfig Infrastructure { get; init; } = new();
     public Dictionary<string, ServiceDef> Services { get; init; } = [];
 
     public IEnumerable<KeyValuePair<string, ServiceDef>> GetActive(ServiceType type)
         => Services.Where(kvp => kvp.Value.Active && kvp.Value.Type == type);
+}
+
+public sealed class InfrastructureConfig
+{
+    /// <summary>
+    /// Path to docker-compose file for infrastructure containers.
+    /// </summary>
+    public string? DockerComposePath { get; init; }
+
+    /// <summary>
+    /// Docker Compose project name (e.g. "nexus-infrastructure").
+    /// Containers will be grouped under this name in Docker Desktop.
+    /// </summary>
+    public string? DockerComposeProject { get; init; }
+
+    /// <summary>
+    /// Docker network name (e.g. "nexus-network").
+    /// Created automatically if it doesn't exist.
+    /// </summary>
+    public string? Network { get; init; }
+
+    /// <summary>
+    /// Docker-compose service names to start (e.g. ["mongo", "postgres-sql", "redis-cache"]).
+    /// If empty, all active Container services are started.
+    /// </summary>
+    public List<string> DockerComposeServices { get; init; } = [];
+
+    public bool IsDockerComposeManaged =>
+        !string.IsNullOrEmpty(DockerComposePath) && !string.IsNullOrEmpty(DockerComposeProject);
 }
 
 public enum ServiceType

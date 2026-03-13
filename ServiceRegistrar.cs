@@ -23,9 +23,17 @@ public static class ServiceRegistrar
         var dotnetServices = active.Where(kvp => kvp.Value.Type == ServiceType.DotNet).ToDictionary();
         var clientServices = active.Where(kvp => kvp.Value.Type == ServiceType.Client).ToDictionary();
 
-        // Infrastructure first, then backends, then frontends
-        foreach (var (name, def) in containerServices)
-            RegisterContainerService(builder, name, def);
+        // Infrastructure: docker-compose manages containers, Aspire only creates them as fallback
+        if (config.Infrastructure.IsDockerComposeManaged)
+        {
+            if (containerServices.Count > 0)
+                BuildLogger.Info($"[CONTAINER] {containerServices.Count} container(s) managed by docker-compose ({config.Infrastructure.DockerComposeProject}).");
+        }
+        else
+        {
+            foreach (var (name, def) in containerServices)
+                RegisterContainerService(builder, name, def);
+        }
 
         foreach (var (name, def) in dotnetServices)
             RegisterDotNetService(builder, name, def, config.Environment);
@@ -78,7 +86,8 @@ public static class ServiceRegistrar
     {
         BuildLogger.Info($"[CONTAINER] {containerName}: {def.Image}:{def.Tag} -> localhost:{def.Port}");
 
-        var container = builder.AddContainer(containerName, def.Image!, def.Tag);
+        var container = builder.AddContainer(containerName, def.Image!, def.Tag)
+            .WithLifetime(ContainerLifetime.Persistent);
 
         // Primary port: Port = host port, TargetPort = container port (defaults to same as Port)
         var targetPort = def.TargetPort ?? def.Port;
@@ -91,8 +100,13 @@ public static class ServiceRegistrar
         foreach (var (key, value) in def.EnvironmentVariables)
             container.WithEnvironment(key, value);
 
-        foreach (var (hostPath, containerPath) in def.Volumes)
-            container.WithBindMount(hostPath, containerPath);
+        foreach (var (source, containerPath) in def.Volumes)
+        {
+            if (Path.IsPathRooted(source) || source.StartsWith("./") || source.StartsWith("../"))
+                container.WithBindMount(source, containerPath);
+            else
+                container.WithVolume(source, containerPath);
+        }
 
         foreach (var arg in def.Args)
             container.WithArgs(arg.Split(' ', StringSplitOptions.RemoveEmptyEntries));
@@ -109,7 +123,21 @@ public static class ServiceRegistrar
 
         var (command, args) = ProcessRunner.ParseCommand(devCmd);
 
-        var app = builder.AddExecutable(clientName, command, def.WorkingDirectory!, args.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        // On Windows, .cmd/.bat files (npm, npx, etc.) require cmd.exe to execute
+        string executable;
+        string[] execArgs;
+        if (OperatingSystem.IsWindows() && !Path.HasExtension(command))
+        {
+            executable = "cmd.exe";
+            execArgs = ["/c", command, .. args.Split(' ', StringSplitOptions.RemoveEmptyEntries)];
+        }
+        else
+        {
+            executable = command;
+            execArgs = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        }
+
+        var app = builder.AddExecutable(clientName, executable, def.WorkingDirectory!, execArgs)
             .WithHttpEndpoint(port: def.Port, targetPort: def.Port, name: "http", isProxied: false);
 
         foreach (var (key, value) in def.EnvironmentVariables)
