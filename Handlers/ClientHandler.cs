@@ -29,7 +29,7 @@ public sealed class ClientHandler : ServiceHandlerBase
     }
 
     public override async Task PreRunBatchAsync(
-        IReadOnlyDictionary<string, ServiceDef> services, CancellationToken ct)
+        IReadOnlyDictionary<string, ServiceDef> services, string buildConfiguration, CancellationToken ct)
     {
         foreach (var (name, def) in services)
         {
@@ -38,7 +38,8 @@ public sealed class ClientHandler : ServiceHandlerBase
         }
     }
 
-    public override async Task RebuildAsync(string serviceName, ServiceDef def, CancellationToken ct)
+    public override async Task RebuildAsync(string serviceName, ServiceDef def,
+        string buildConfiguration, CancellationToken ct)
     {
         var installCmd = def.InstallCommand ?? ServiceDef.Defaults.NpmInstallCommand;
         if (string.IsNullOrWhiteSpace(installCmd))

@@ -26,6 +26,12 @@ public sealed class ServiceDef
     /// <summary>Set to true to include this service when Aspire starts.</summary>
     public bool Active { get; init; }
 
+    /// <summary>
+    /// Build configuration override for this service (e.g. "Debug", "Release").
+    /// When null, inherits from <see cref="AppHostConfig.BuildConfiguration"/>.
+    /// </summary>
+    public string? BuildConfiguration { get; init; }
+
     /// <summary>Display group in console output (e.g. "Backend", "Frontend").</summary>
     public string? Group { get; init; }
 

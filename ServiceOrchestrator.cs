@@ -57,7 +57,7 @@ public static class ServiceOrchestrator
         {
             var services = config.GetActive(handler.Type).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
             if (services.Count > 0)
-                await handler.PreRunBatchAsync(services, ct);
+                await handler.PreRunBatchAsync(services, config.BuildConfiguration, ct);
         }
     }
 
@@ -79,7 +79,7 @@ public static class ServiceOrchestrator
             return;
         }
 
-        var context = new RegistrationContext(config.Environment, basePath);
+        var context = new RegistrationContext(config.Environment, basePath, config.BuildConfiguration);
 
         // Container services: docker-compose manages them, or register as Aspire containers
         var containerServices = active.Where(kvp => kvp.Value.Type == ServiceType.Container).ToDictionary();
@@ -102,7 +102,7 @@ public static class ServiceOrchestrator
                 handler.Register(builder, name, def, context);
         }
 
-        SubscribeRebuildOnRestart(builder, active);
+        SubscribeRebuildOnRestart(builder, active, config.BuildConfiguration);
     }
 
     // ── Private helpers ──────────────────────────────────
@@ -161,7 +161,8 @@ public static class ServiceOrchestrator
     /// </summary>
     private static void SubscribeRebuildOnRestart(
         IDistributedApplicationBuilder builder,
-        Dictionary<string, ServiceDef> services)
+        Dictionary<string, ServiceDef> services,
+        string buildConfiguration)
     {
         var rebuildableServices = services
             .Where(kvp => HandlerMap.TryGetValue(kvp.Value.Type, out var handler) && handler.HasRebuildOnRestart)
@@ -186,7 +187,7 @@ public static class ServiceOrchestrator
             }
 
             if (HandlerMap.TryGetValue(def.Type, out var handler))
-                await handler.RebuildAsync(resourceName, def, ct);
+                await handler.RebuildAsync(resourceName, def, buildConfiguration, ct);
         });
     }
 

@@ -46,9 +46,10 @@ public sealed class NodeJsHandler : ServiceHandlerBase
     }
 
     public override Task PreRunBatchAsync(
-        IReadOnlyDictionary<string, ServiceDef> services, CancellationToken ct)
+        IReadOnlyDictionary<string, ServiceDef> services, string buildConfiguration, CancellationToken ct)
         => Task.CompletedTask;
 
-    public override Task RebuildAsync(string serviceName, ServiceDef def, CancellationToken ct)
+    public override Task RebuildAsync(string serviceName, ServiceDef def,
+        string buildConfiguration, CancellationToken ct)
         => Task.CompletedTask;
 }

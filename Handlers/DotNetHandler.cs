@@ -30,7 +30,7 @@ public sealed class DotNetHandler : ServiceHandlerBase
     }
 
     public override async Task PreRunBatchAsync(
-        IReadOnlyDictionary<string, ServiceDef> services, CancellationToken ct)
+        IReadOnlyDictionary<string, ServiceDef> services, string buildConfiguration, CancellationToken ct)
     {
         if (services.Count == 0)
             return;
@@ -44,8 +44,8 @@ public sealed class DotNetHandler : ServiceHandlerBase
 
         foreach (var sln in solutions)
         {
-            BuildLogger.Info($"[PRE-BUILD] Building solution: {sln}");
-            var success = await ProcessRunner.RunAsync("dotnet", $"build \"{sln}\" -c Debug", ct: ct);
+            BuildLogger.Info($"[PRE-BUILD] Building solution: {sln} ({buildConfiguration})");
+            var success = await ProcessRunner.RunAsync("dotnet", $"build \"{sln}\" -c {buildConfiguration}", ct: ct);
             if (!success)
                 throw new InvalidOperationException(
                     $"Solution build failed: {sln}. Fix build errors before starting the host.");
@@ -55,8 +55,9 @@ public sealed class DotNetHandler : ServiceHandlerBase
         var failed = new List<string>();
         foreach (var (name, def) in services.Where(kvp => string.IsNullOrEmpty(kvp.Value.SolutionPath)))
         {
-            BuildLogger.Info($"[PRE-BUILD] Building project: {name}");
-            var success = await ProcessRunner.RunAsync("dotnet", $"build \"{def.ProjectPath}\" -c Debug", ct: ct);
+            var config = def.BuildConfiguration ?? buildConfiguration;
+            BuildLogger.Info($"[PRE-BUILD] Building project: {name} ({config})");
+            var success = await ProcessRunner.RunAsync("dotnet", $"build \"{def.ProjectPath}\" -c {config}", ct: ct);
             if (!success)
                 failed.Add(name);
         }
@@ -71,10 +72,12 @@ public sealed class DotNetHandler : ServiceHandlerBase
         BuildLogger.Success("[PRE-BUILD OK] All .NET services built successfully.");
     }
 
-    public override async Task RebuildAsync(string serviceName, ServiceDef def, CancellationToken ct)
+    public override async Task RebuildAsync(string serviceName, ServiceDef def,
+        string buildConfiguration, CancellationToken ct)
     {
-        BuildLogger.Info($"[REBUILD] {serviceName}: dotnet build...");
-        var success = await ProcessRunner.RunAsync("dotnet", $"build \"{def.ProjectPath}\" -c Debug", ct: ct);
+        var config = def.BuildConfiguration ?? buildConfiguration;
+        BuildLogger.Info($"[REBUILD] {serviceName}: dotnet build ({config})...");
+        var success = await ProcessRunner.RunAsync("dotnet", $"build \"{def.ProjectPath}\" -c {config}", ct: ct);
         if (!success)
             throw new InvalidOperationException(
                 $"Build failed for {serviceName}. Fix build errors before restarting.");

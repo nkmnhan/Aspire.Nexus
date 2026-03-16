@@ -8,6 +8,14 @@ public sealed class AppHostConfig
 {
     public ServiceEnvironmentConfig Environment { get; init; } = new();
     public InfrastructureConfig Infrastructure { get; init; } = new();
+
+    /// <summary>
+    /// Global build configuration for all services that support it (e.g. DotNet).
+    /// Per-service <see cref="ServiceDef.BuildConfiguration"/> overrides this value.
+    /// Default: "Debug".
+    /// </summary>
+    public string BuildConfiguration { get; init; } = "Debug";
+
     public Dictionary<string, ServiceDef> Services { get; init; } = [];
 
     public IEnumerable<KeyValuePair<string, ServiceDef>> GetActive(ServiceType type)

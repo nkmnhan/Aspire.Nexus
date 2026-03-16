@@ -21,13 +21,15 @@ public interface IServiceHandler
     bool HasPreRunPhase { get; }
 
     /// <summary>Run pre-startup tasks for all services of this type (build, install).</summary>
-    Task PreRunBatchAsync(IReadOnlyDictionary<string, ServiceDef> services, CancellationToken ct);
+    Task PreRunBatchAsync(IReadOnlyDictionary<string, ServiceDef> services,
+                          string buildConfiguration, CancellationToken ct);
 
     /// <summary>Whether this handler supports rebuild-on-restart from the Aspire dashboard.</summary>
     bool HasRebuildOnRestart { get; }
 
     /// <summary>Rebuild/reinstall a single service when restarted from the dashboard.</summary>
-    Task RebuildAsync(string serviceName, ServiceDef def, CancellationToken ct);
+    Task RebuildAsync(string serviceName, ServiceDef def,
+                      string buildConfiguration, CancellationToken ct);
 }
 
 /// <summary>
@@ -35,4 +37,5 @@ public interface IServiceHandler
 /// </summary>
 public sealed record RegistrationContext(
     ServiceEnvironmentConfig Environment,
-    string? BasePath);
+    string? BasePath,
+    string BuildConfiguration = "Debug");

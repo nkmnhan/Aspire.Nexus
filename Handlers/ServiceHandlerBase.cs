@@ -14,11 +14,13 @@ public abstract class ServiceHandlerBase : IServiceHandler
 
     public abstract bool HasPreRunPhase { get; }
 
-    public abstract Task PreRunBatchAsync(IReadOnlyDictionary<string, ServiceDef> services, CancellationToken ct);
+    public abstract Task PreRunBatchAsync(IReadOnlyDictionary<string, ServiceDef> services,
+        string buildConfiguration, CancellationToken ct);
 
     public abstract bool HasRebuildOnRestart { get; }
 
-    public abstract Task RebuildAsync(string serviceName, ServiceDef def, CancellationToken ct);
+    public abstract Task RebuildAsync(string serviceName, ServiceDef def,
+        string buildConfiguration, CancellationToken ct);
 
     // ── Shared validation helpers ────────────────────────
 
