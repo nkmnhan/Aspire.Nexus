@@ -125,6 +125,46 @@ public static class ResourceBuilderExtensions
             : resource.WithHttpEndpoint(port: port, targetPort: port, name: "http", isProxied: false);
     }
 
+    /// <summary>
+    /// Forwards the Aspire dashboard's OTLP endpoint to the resource so services with
+    /// OpenTelemetry configured (e.g. Aspire ServiceDefaults) send structured logs, traces,
+    /// and metrics directly to the dashboard via OTLP.
+    /// <para>
+    /// This is critical for <c>AddExecutable</c> resources: unlike <c>AddProject</c>, the DCP
+    /// does not automatically inject OTLP environment variables for executables. Without this,
+    /// the dashboard only receives stdout/stderr console output, which can break on restart.
+    /// With OTLP forwarding, structured logs flow reliably regardless of process lifecycle.
+    /// </para>
+    /// </summary>
+    public static IResourceBuilder<T> WithOtlpForwarding<T>(
+        this IResourceBuilder<T> resource,
+        string serviceName) where T : IResourceWithEnvironment
+    {
+        // Read OTLP endpoint from the AppHost's environment (set by the Aspire launcher/DCP).
+        var otlpEndpoint = Environment.GetEnvironmentVariable("DOTNET_DASHBOARD_OTLP_GRPC_ENDPOINT_URL")
+                        ?? Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
+
+        if (string.IsNullOrEmpty(otlpEndpoint))
+            return resource;
+
+        resource
+            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", otlpEndpoint)
+            .WithEnvironment("OTEL_SERVICE_NAME", serviceName)
+            .WithEnvironment("OTEL_RESOURCE_ATTRIBUTES", $"service.instance.id={serviceName}");
+
+        // Forward OTLP auth headers if present (required when dashboard uses API key auth).
+        var otlpHeaders = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_HEADERS");
+        if (!string.IsNullOrEmpty(otlpHeaders))
+            resource.WithEnvironment("OTEL_EXPORTER_OTLP_HEADERS", otlpHeaders);
+
+        // Reduce batching delay for faster log delivery to the dashboard during development.
+        resource
+            .WithEnvironment("OTEL_BLRP_SCHEDULE_DELAY", "1000")
+            .WithEnvironment("OTEL_BSP_SCHEDULE_DELAY", "1000");
+
+        return resource;
+    }
+
     private static string ResolvePath(string path, string? basePath)
         => basePath is not null ? Path.GetFullPath(Path.Combine(basePath, path)) : path;
 }

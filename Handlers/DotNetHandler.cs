@@ -48,13 +48,14 @@ public sealed class DotNetHandler : ServiceHandlerBase
         if (dllPath is not null)
         {
             // Use "dotnet exec" to run the pre-built DLL directly — no MSBuild overhead.
-            // AddProject uses "dotnet run" which triggers a full MSBuild per service.
+            // AddProject uses "dotnet run" which triggers a full MSBuild per service,
+            // causing excessive CPU/RAM with many services.
             var projectDir = Path.GetDirectoryName(Path.GetFullPath(def.ProjectPath!))!;
             BuildLogger.Info($"[EXEC] {serviceName}: dotnet exec {Path.GetFileName(dllPath)}");
 
             ConfigureService(
                 builder.AddExecutable(serviceName, "dotnet", projectDir, ["exec", dllPath]),
-                def, context);
+                serviceName, def, context);
         }
         else
         {
@@ -64,17 +65,19 @@ public sealed class DotNetHandler : ServiceHandlerBase
                 {
                     options.ExcludeLaunchProfile = true;
                 }),
-                def, context);
+                serviceName, def, context);
         }
     }
 
-    private static void ConfigureService<T>(IResourceBuilder<T> resource, ServiceDef def,
-        RegistrationContext context) where T : IResourceWithEndpoints, IResourceWithEnvironment
+    private static void ConfigureService<T>(IResourceBuilder<T> resource, string serviceName,
+        ServiceDef def, RegistrationContext context)
+        where T : IResourceWithEndpoints, IResourceWithEnvironment
     {
         resource
             .WithServiceEndpoint(def)
             .WithCertificate(def, context.BasePath)
-            .WithAllEnvironmentVariables(def, context.Environment);
+            .WithAllEnvironmentVariables(def, context.Environment)
+            .WithOtlpForwarding(serviceName);
     }
 
     /// <summary>

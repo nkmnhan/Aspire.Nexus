@@ -1,6 +1,18 @@
 using Aspire.Nexus;
 using Microsoft.Extensions.Configuration;
 
+// Prevent thread pool starvation when many services run concurrently.
+// Aspire's DCP uses thread pool threads for log forwarding and resource lifecycle events.
+// Without this, concurrent rebuilds and process I/O can exhaust the pool, causing
+// Kestrel heartbeat warnings and dropped log streams on service restart.
+ThreadPool.SetMinThreads(workerThreads: 64, completionPortThreads: 64);
+
+// Kill MSBuild worker nodes after each build completes instead of keeping them alive.
+// By default, MSBuild reuses nodes across builds (nodeReuse:true), which leaves 10-15+
+// dotnet processes (~100-250 MB each) lingering after pre-build and rebuild phases.
+// With many services, this wastes 1-2 GB of RAM for idle MSBuild nodes.
+Environment.SetEnvironmentVariable("MSBUILDDISABLENODEREUSE", "1");
+
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {
