@@ -34,36 +34,18 @@ public sealed class PythonHandler : ServiceHandlerBase
             .WithAllEnvironmentVariables(def);
     }
 
-    public override async Task PreRunBatchAsync(
+    public override Task PreRunBatchAsync(
         IReadOnlyDictionary<string, ServiceDef> services, string buildConfiguration, CancellationToken ct)
-    {
-        foreach (var (name, def) in services)
-        {
-            var installCmd = ResolveInstallCommand(def);
-            await RunInstallCommandAsync(name, installCmd, def.WorkingDirectory, ct);
-        }
-    }
+        => RunInstallBatchAsync(services, ct);
 
-    public override async Task RebuildAsync(string serviceName, ServiceDef def,
+    public override Task RebuildAsync(string serviceName, ServiceDef def,
         string buildConfiguration, CancellationToken ct)
-    {
-        var installCmd = ResolveInstallCommand(def);
-        if (string.IsNullOrWhiteSpace(installCmd))
-            return;
-
-        BuildLogger.Info($"[REINSTALL] {serviceName}: {installCmd}...");
-        var (command, args) = ProcessRunner.ParseCommand(installCmd);
-        var success = await ProcessRunner.RunAsync(command, args, def.WorkingDirectory, ct: ct);
-        if (!success)
-            BuildLogger.Warn($"[REINSTALL] {serviceName} failed — service may still work if dependencies exist.");
-        else
-            BuildLogger.Success($"[REINSTALL OK] {serviceName}");
-    }
+        => RunInstallRebuildAsync(serviceName, def, ct);
 
     /// <summary>
     /// Resolves the install command, replacing bare "pip" with the venv pip path when applicable.
     /// </summary>
-    private static string ResolveInstallCommand(ServiceDef def)
+    protected override string ResolveInstallCommand(ServiceDef def)
     {
         var installCmd = def.InstallCommand ?? ServiceDef.Defaults.PipInstallCommand;
 

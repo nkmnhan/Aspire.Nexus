@@ -28,29 +28,11 @@ public sealed class ClientHandler : ServiceHandlerBase
             .WithAllEnvironmentVariables(def);
     }
 
-    public override async Task PreRunBatchAsync(
+    public override Task PreRunBatchAsync(
         IReadOnlyDictionary<string, ServiceDef> services, string buildConfiguration, CancellationToken ct)
-    {
-        foreach (var (name, def) in services)
-        {
-            var installCmd = def.InstallCommand ?? ServiceDef.Defaults.NpmInstallCommand;
-            await RunInstallCommandAsync(name, installCmd, def.WorkingDirectory, ct);
-        }
-    }
+        => RunInstallBatchAsync(services, ct);
 
-    public override async Task RebuildAsync(string serviceName, ServiceDef def,
+    public override Task RebuildAsync(string serviceName, ServiceDef def,
         string buildConfiguration, CancellationToken ct)
-    {
-        var installCmd = def.InstallCommand ?? ServiceDef.Defaults.NpmInstallCommand;
-        if (string.IsNullOrWhiteSpace(installCmd))
-            return;
-
-        BuildLogger.Info($"[REINSTALL] {serviceName}: {installCmd}...");
-        var (command, args) = ProcessRunner.ParseCommand(installCmd);
-        var success = await ProcessRunner.RunAsync(command, args, def.WorkingDirectory, ct: ct);
-        if (!success)
-            BuildLogger.Warn($"[REINSTALL] {serviceName} failed — service may still work if dependencies exist.");
-        else
-            BuildLogger.Success($"[REINSTALL OK] {serviceName}");
-    }
+        => RunInstallRebuildAsync(serviceName, def, ct);
 }

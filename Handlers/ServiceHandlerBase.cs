@@ -14,6 +14,9 @@ public abstract class ServiceHandlerBase : IServiceHandler
 
     public abstract bool HasPreRunPhase { get; }
 
+    public virtual Task<bool> IsServiceReadyAsync(string serviceName, ServiceDef def, CancellationToken ct)
+        => Task.FromResult(false);
+
     public abstract Task PreRunBatchAsync(IReadOnlyDictionary<string, ServiceDef> services,
         string buildConfiguration, CancellationToken ct);
 
@@ -38,7 +41,36 @@ public abstract class ServiceHandlerBase : IServiceHandler
             errors.Add($"\"{name}\" ({TypeName}): \"Port\" is required.");
     }
 
-    // ── Shared install helper ────────────────────────────
+    // ── Shared install helpers ─────────────────────────────
+
+    protected virtual string ResolveInstallCommand(ServiceDef def)
+        => def.InstallCommand ?? ServiceDef.Defaults.NpmInstallCommand;
+
+    protected async Task RunInstallBatchAsync(
+        IReadOnlyDictionary<string, ServiceDef> services, CancellationToken ct)
+    {
+        foreach (var (name, def) in services)
+        {
+            var installCmd = ResolveInstallCommand(def);
+            await RunInstallCommandAsync(name, installCmd, def.WorkingDirectory, ct);
+        }
+    }
+
+    protected async Task RunInstallRebuildAsync(
+        string serviceName, ServiceDef def, CancellationToken ct)
+    {
+        var installCmd = ResolveInstallCommand(def);
+        if (string.IsNullOrWhiteSpace(installCmd))
+            return;
+
+        BuildLogger.Info($"[REINSTALL] {serviceName}: {installCmd}...");
+        var (command, args) = ProcessRunner.ParseCommand(installCmd);
+        var success = await ProcessRunner.RunAsync(command, args, def.WorkingDirectory, ct: ct);
+        if (!success)
+            BuildLogger.Warn($"[REINSTALL] {serviceName} failed — service may still work if dependencies exist.");
+        else
+            BuildLogger.Success($"[REINSTALL OK] {serviceName}");
+    }
 
     protected static async Task RunInstallCommandAsync(
         string serviceName, string installCommand, string? workingDirectory, CancellationToken ct)

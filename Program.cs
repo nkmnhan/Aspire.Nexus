@@ -1,12 +1,18 @@
 using Aspire.Nexus;
 using Microsoft.Extensions.Configuration;
 
+// Prevent MSBuild from keeping long-lived node processes after DCP's "dotnet run" builds.
+// Without this, 14 services × ~13 MSBuild nodes = 150+ zombie processes at 100% CPU.
+Environment.SetEnvironmentVariable("MSBUILDDISABLENODEREUSE", "1");
+Environment.SetEnvironmentVariable("DOTNET_CLI_USE_MSBUILD_SERVER", "0");
+
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {
     e.Cancel = true;
     cts.Cancel();
 };
+AppDomain.CurrentDomain.ProcessExit += (_, _) => ProcessRunner.KillAll();
 
 try
 {
@@ -26,6 +32,7 @@ try
 }
 catch (OperationCanceledException)
 {
+    ProcessRunner.KillAll();
     BuildLogger.Warn("Cancelled by user.");
 }
 catch (Exception ex)

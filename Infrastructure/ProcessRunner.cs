@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 
 namespace Aspire.Nexus.Infrastructure;
@@ -9,6 +10,33 @@ public static class ProcessRunner
     /// Matches the order Windows CMD uses to resolve commands.
     /// </summary>
     private static readonly string[] WindowsExecutableExtensions = [".cmd", ".bat", ".exe", ".com"];
+
+    /// <summary>
+    /// Tracks all spawned child processes so they can be killed on shutdown.
+    /// </summary>
+    private static readonly ConcurrentDictionary<int, Process> TrackedProcesses = new();
+
+    /// <summary>
+    /// Kills all tracked child processes and their process trees.
+    /// Call on host shutdown to prevent orphaned processes.
+    /// </summary>
+    public static void KillAll()
+    {
+        foreach (var (pid, process) in TrackedProcesses)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    BuildLogger.Info($"[CLEANUP] Killed process {pid}");
+                }
+            }
+            catch { /* already exited */ }
+        }
+
+        TrackedProcesses.Clear();
+    }
 
     public static async Task<bool> RunAsync(
         string command, string arguments, string? workingDirectory = null,
@@ -32,6 +60,8 @@ public static class ProcessRunner
 
         if (process is null)
             return false;
+
+        TrackedProcesses.TryAdd(process.Id, process);
 
         await using var reg = ct.Register(() =>
         {
@@ -57,11 +87,57 @@ public static class ProcessRunner
         }
 
         await process.WaitForExitAsync(ct);
+        TrackedProcesses.TryRemove(process.Id, out _);
 
         if (!silent && process.ExitCode != 0)
             BuildLogger.Error($"[FAILED] exit code {process.ExitCode}");
 
         return process.ExitCode == 0;
+    }
+
+    /// <summary>
+    /// Runs a command and captures stdout. Returns null if the process fails.
+    /// </summary>
+    public static async Task<string?> RunCaptureAsync(
+        string command, string arguments, string? workingDirectory = null,
+        CancellationToken ct = default)
+    {
+        var resolvedCommand = ResolveExecutable(command);
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = resolvedCommand,
+            Arguments = arguments,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        if (workingDirectory is not null)
+            psi.WorkingDirectory = workingDirectory;
+
+        using var process = Process.Start(psi);
+        if (process is null)
+            return null;
+
+        TrackedProcesses.TryAdd(process.Id, process);
+
+        await using var reg = ct.Register(() =>
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch { /* already exited */ }
+        });
+
+        var output = await process.StandardOutput.ReadToEndAsync(ct);
+        await process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+        TrackedProcesses.TryRemove(process.Id, out _);
+
+        return process.ExitCode == 0 ? output : null;
     }
 
     /// <summary>

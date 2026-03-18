@@ -55,9 +55,20 @@ public static class ServiceOrchestrator
 
         foreach (var handler in Handlers.Where(handler => handler.HasPreRunPhase))
         {
-            var services = config.GetActive(handler.Type).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-            if (services.Count > 0)
-                await handler.PreRunBatchAsync(services, config.BuildConfiguration, ct);
+            var allServices = config.GetActive(handler.Type).ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+            if (allServices.Count == 0)
+                continue;
+
+            // Filter out services that are already prepared (polymorphic check)
+            var notReady = new Dictionary<string, ServiceDef>();
+            foreach (var (name, def) in allServices)
+            {
+                if (!await handler.IsServiceReadyAsync(name, def, ct))
+                    notReady.Add(name, def);
+            }
+
+            if (notReady.Count > 0)
+                await handler.PreRunBatchAsync(notReady, config.BuildConfiguration, ct);
         }
     }
 
@@ -132,6 +143,38 @@ public static class ServiceOrchestrator
         {
             BuildLogger.Info("[INFRA] No active infrastructure services to start.");
             return;
+        }
+
+        // Check which services are already running and skip them
+        try
+        {
+            var psArgs = $"-p {infra.DockerComposeProject} -f \"{infra.DockerComposePath}\" ps --format \"{{{{.Service}}}} {{{{.State}}}}\"";
+            var output = await ProcessRunner.RunCaptureAsync("docker", $"compose {psArgs}", ct: ct);
+            if (output is not null)
+            {
+                var running = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var parts = line.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 2 && parts[1].Contains("running", StringComparison.OrdinalIgnoreCase))
+                        running.Add(parts[0]);
+                }
+
+                var alreadyRunning = services.Where(s => running.Contains(s)).ToList();
+                if (alreadyRunning.Count > 0)
+                    BuildLogger.Info($"[INFRA] Already running (skipping): {string.Join(" ", alreadyRunning)}");
+
+                services = services.Where(s => !running.Contains(s)).ToList();
+                if (services.Count == 0)
+                {
+                    BuildLogger.Success("[INFRA OK] All infrastructure services already running.");
+                    return;
+                }
+            }
+        }
+        catch
+        {
+            // Graceful fallback — proceed with starting all services
         }
 
         var serviceList = string.Join(" ", services);

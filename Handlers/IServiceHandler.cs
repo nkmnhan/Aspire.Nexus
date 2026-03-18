@@ -20,6 +20,12 @@ public interface IServiceHandler
     /// <summary>Whether this handler needs a pre-run phase (build/install before Aspire starts).</summary>
     bool HasPreRunPhase { get; }
 
+    /// <summary>
+    /// Check if a service is already prepared and can skip pre-run.
+    /// Return true to skip PreRunBatchAsync for this service.
+    /// </summary>
+    Task<bool> IsServiceReadyAsync(string serviceName, ServiceDef def, CancellationToken ct);
+
     /// <summary>Run pre-startup tasks for all services of this type (build, install).</summary>
     Task PreRunBatchAsync(IReadOnlyDictionary<string, ServiceDef> services,
                           string buildConfiguration, CancellationToken ct);

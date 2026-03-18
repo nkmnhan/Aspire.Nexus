@@ -92,6 +92,11 @@ public static class ResourceBuilderExtensions
             {
                 resource.WithEnvironment("ASPNETCORE_ENVIRONMENT", env.AspNetCoreEnvironment)
                         .WithEnvironment("Logging__LogLevel__Default", env.LogLevel);
+
+                // Use Workstation GC in dev to reduce per-service memory (~50% less).
+                // Server GC is the ASP.NET default but wastes memory when running many services locally.
+                if (!def.EnvironmentVariables.ContainsKey("DOTNET_gcServer"))
+                    resource.WithEnvironment("DOTNET_gcServer", "0");
             }
 
             // Global extra variables — all service types
