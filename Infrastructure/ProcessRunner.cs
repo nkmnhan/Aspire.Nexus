@@ -10,6 +10,7 @@ public static class ProcessRunner
     /// Matches the order Windows CMD uses to resolve commands.
     /// </summary>
     private static readonly string[] WindowsExecutableExtensions = [".cmd", ".bat", ".exe", ".com"];
+    private static readonly ConcurrentDictionary<string, string> ResolvedCommandCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Tracks all spawned child processes so they can be killed on shutdown.
@@ -46,28 +47,34 @@ public static class ProcessRunner
         if (process is null)
             return false;
 
-        await using var reg = RegisterCancellation(process, ct);
-
-        if (silent)
+        try
         {
-            var outputTask = process.StandardOutput.ReadToEndAsync(ct);
-            var errorTask = process.StandardError.ReadToEndAsync(ct);
-            await Task.WhenAll(outputTask, errorTask);
+            await using var reg = RegisterCancellation(process, ct);
+
+            if (silent)
+            {
+                var outputTask = process.StandardOutput.ReadToEndAsync(ct);
+                var errorTask = process.StandardError.ReadToEndAsync(ct);
+                await Task.WhenAll(outputTask, errorTask);
+            }
+            else
+            {
+                var outputTask = StreamLinesAsync(process.StandardOutput, line => BuildLogger.Info($"  {line}"), ct);
+                var errorTask = StreamLinesAsync(process.StandardError, line => LogStderr(line), ct);
+                await Task.WhenAll(outputTask, errorTask);
+            }
+
+            await process.WaitForExitAsync(ct);
+
+            if (!silent && process.ExitCode != 0)
+                BuildLogger.Error($"[FAILED] exit code {process.ExitCode}");
+
+            return process.ExitCode == 0;
         }
-        else
+        finally
         {
-            var outputTask = StreamLinesAsync(process.StandardOutput, line => BuildLogger.Info($"  {line}"), ct);
-            var errorTask = StreamLinesAsync(process.StandardError, line => LogStderr(line), ct);
-            await Task.WhenAll(outputTask, errorTask);
+            TrackedProcesses.TryRemove(process.Id, out _);
         }
-
-        await process.WaitForExitAsync(ct);
-        TrackedProcesses.TryRemove(process.Id, out _);
-
-        if (!silent && process.ExitCode != 0)
-            BuildLogger.Error($"[FAILED] exit code {process.ExitCode}");
-
-        return process.ExitCode == 0;
     }
 
     /// <summary>
@@ -81,14 +88,20 @@ public static class ProcessRunner
         if (process is null)
             return null;
 
-        await using var reg = RegisterCancellation(process, ct);
+        try
+        {
+            await using var reg = RegisterCancellation(process, ct);
 
-        var output = await process.StandardOutput.ReadToEndAsync(ct);
-        await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        TrackedProcesses.TryRemove(process.Id, out _);
+            var output = await process.StandardOutput.ReadToEndAsync(ct);
+            await process.StandardError.ReadToEndAsync(ct);
+            await process.WaitForExitAsync(ct);
 
-        return process.ExitCode == 0 ? output : null;
+            return process.ExitCode == 0 ? output : null;
+        }
+        finally
+        {
+            TrackedProcesses.TryRemove(process.Id, out _);
+        }
     }
 
     private static Process? StartTracked(string command, string arguments, string? workingDirectory)
@@ -153,25 +166,25 @@ public static class ProcessRunner
     /// </summary>
     private static string ResolveExecutable(string command)
     {
-        // Already has an extension (e.g. "dotnet.exe") or not on Windows — use as-is
         if (Path.HasExtension(command) || !OperatingSystem.IsWindows())
             return command;
 
-        // Search PATH for the command with common Windows extensions
-        var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
-
-        foreach (var directory in pathDirs)
+        return ResolvedCommandCache.GetOrAdd(command, static cmd =>
         {
-            foreach (var extension in WindowsExecutableExtensions)
-            {
-                var candidate = Path.Combine(directory, command + extension);
-                if (File.Exists(candidate))
-                    return candidate;
-            }
-        }
+            var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
 
-        // Not found in PATH — return as-is, let the OS throw a clear error
-        return command;
+            foreach (var directory in pathDirs)
+            {
+                foreach (var extension in WindowsExecutableExtensions)
+                {
+                    var candidate = Path.Combine(directory, cmd + extension);
+                    if (File.Exists(candidate))
+                        return candidate;
+                }
+            }
+
+            return cmd;
+        });
     }
 
     private static void LogStderr(string line)

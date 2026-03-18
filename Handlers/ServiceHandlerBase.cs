@@ -72,7 +72,7 @@ public abstract class ServiceHandlerBase : IServiceHandler
             BuildLogger.Success($"[REINSTALL OK] {serviceName}");
     }
 
-    protected static async Task RunInstallCommandAsync(
+    private static async Task RunInstallCommandAsync(
         string serviceName, string installCommand, string? workingDirectory, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(installCommand))

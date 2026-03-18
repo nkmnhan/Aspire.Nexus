@@ -1,4 +1,5 @@
 using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
 
 namespace Aspire.Nexus.Handlers;
 
@@ -48,27 +49,32 @@ public sealed class DotNetHandler : ServiceHandlerBase
         {
             // Use "dotnet exec" to run the pre-built DLL directly — no MSBuild overhead.
             // AddProject uses "dotnet run" which triggers a full MSBuild per service.
-            // With 14 services that's 150+ MSBuild nodes at 100% CPU.
             var projectDir = Path.GetDirectoryName(Path.GetFullPath(def.ProjectPath!))!;
             BuildLogger.Info($"[EXEC] {serviceName}: dotnet exec {Path.GetFileName(dllPath)}");
 
-            builder.AddExecutable(serviceName, "dotnet", projectDir, ["exec", dllPath])
-                .WithServiceEndpoint(def)
-                .WithCertificate(def, context.BasePath)
-                .WithAllEnvironmentVariables(def, context.Environment);
+            ConfigureService(
+                builder.AddExecutable(serviceName, "dotnet", projectDir, ["exec", dllPath]),
+                def, context);
         }
         else
         {
-            // Fallback to AddProject if DLL not found (first run, build failed, etc.)
             BuildLogger.Warn($"[FALLBACK] {serviceName}: using AddProject (build output not found)");
-            builder.AddProject(serviceName, def.ProjectPath!, options =>
+            ConfigureService(
+                builder.AddProject(serviceName, def.ProjectPath!, options =>
                 {
                     options.ExcludeLaunchProfile = true;
-                })
-                .WithServiceEndpoint(def)
-                .WithCertificate(def, context.BasePath)
-                .WithAllEnvironmentVariables(def, context.Environment);
+                }),
+                def, context);
         }
+    }
+
+    private static void ConfigureService<T>(IResourceBuilder<T> resource, ServiceDef def,
+        RegistrationContext context) where T : IResourceWithEndpoints, IResourceWithEnvironment
+    {
+        resource
+            .WithServiceEndpoint(def)
+            .WithCertificate(def, context.BasePath)
+            .WithAllEnvironmentVariables(def, context.Environment);
     }
 
     /// <summary>

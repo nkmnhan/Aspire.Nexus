@@ -173,9 +173,9 @@ public static class ServiceOrchestrator
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Graceful fallback — proceed with starting all services
+            BuildLogger.Warn($"[INFRA] Could not check running containers: {ex.Message}");
         }
 
         var serviceList = string.Join(" ", services);
