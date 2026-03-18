@@ -42,36 +42,11 @@ public static class ProcessRunner
         string command, string arguments, string? workingDirectory = null,
         bool silent = false, CancellationToken ct = default)
     {
-        var resolvedCommand = ResolveExecutable(command);
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = resolvedCommand,
-            Arguments = arguments,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-
-        if (workingDirectory is not null)
-            psi.WorkingDirectory = workingDirectory;
-
-        using var process = Process.Start(psi);
-
+        using var process = StartTracked(command, arguments, workingDirectory);
         if (process is null)
             return false;
 
-        TrackedProcesses.TryAdd(process.Id, process);
-
-        await using var reg = ct.Register(() =>
-        {
-            try
-            {
-                if (!process.HasExited)
-                    process.Kill(entireProcessTree: true);
-            }
-            catch { /* already exited */ }
-        });
+        await using var reg = RegisterCancellation(process, ct);
 
         if (silent)
         {
@@ -102,11 +77,25 @@ public static class ProcessRunner
         string command, string arguments, string? workingDirectory = null,
         CancellationToken ct = default)
     {
-        var resolvedCommand = ResolveExecutable(command);
+        using var process = StartTracked(command, arguments, workingDirectory);
+        if (process is null)
+            return null;
 
+        await using var reg = RegisterCancellation(process, ct);
+
+        var output = await process.StandardOutput.ReadToEndAsync(ct);
+        await process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct);
+        TrackedProcesses.TryRemove(process.Id, out _);
+
+        return process.ExitCode == 0 ? output : null;
+    }
+
+    private static Process? StartTracked(string command, string arguments, string? workingDirectory)
+    {
         var psi = new ProcessStartInfo
         {
-            FileName = resolvedCommand,
+            FileName = ResolveExecutable(command),
             Arguments = arguments,
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -116,13 +105,16 @@ public static class ProcessRunner
         if (workingDirectory is not null)
             psi.WorkingDirectory = workingDirectory;
 
-        using var process = Process.Start(psi);
-        if (process is null)
-            return null;
+        var process = Process.Start(psi);
+        if (process is not null)
+            TrackedProcesses.TryAdd(process.Id, process);
 
-        TrackedProcesses.TryAdd(process.Id, process);
+        return process;
+    }
 
-        await using var reg = ct.Register(() =>
+    private static CancellationTokenRegistration RegisterCancellation(Process process, CancellationToken ct)
+    {
+        return ct.Register(() =>
         {
             try
             {
@@ -131,13 +123,6 @@ public static class ProcessRunner
             }
             catch { /* already exited */ }
         });
-
-        var output = await process.StandardOutput.ReadToEndAsync(ct);
-        await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        TrackedProcesses.TryRemove(process.Id, out _);
-
-        return process.ExitCode == 0 ? output : null;
     }
 
     /// <summary>

@@ -8,35 +8,25 @@ public sealed class DotNetHandler : ServiceHandlerBase
     public override bool HasPreRunPhase => true;
     public override bool HasRebuildOnRestart => true;
 
-    public override async Task<bool> IsServiceReadyAsync(
+    public override Task<bool> IsServiceReadyAsync(
         string serviceName, ServiceDef def, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(def.ProjectPath))
-            return false;
+            return Task.FromResult(false);
 
         var projectFile = new FileInfo(def.ProjectPath);
         if (!projectFile.Exists)
-            return false;
+            return Task.FromResult(false);
 
-        // Check if any build output exists in bin/ that is newer than the project file
-        var binDir = Path.Combine(projectFile.DirectoryName!, "bin");
-        if (!Directory.Exists(binDir))
-            return false;
-
-        var projectName = Path.GetFileNameWithoutExtension(def.ProjectPath);
-        var outputDll = Directory.GetFiles(binDir, $"{projectName}.dll", SearchOption.AllDirectories)
-            .Select(f => new FileInfo(f))
-            .OrderByDescending(f => f.LastWriteTimeUtc)
-            .FirstOrDefault();
-
+        var outputDll = FindNewestOutputDll(def.ProjectPath);
         if (outputDll is null)
-            return false;
+            return Task.FromResult(false);
 
         var isReady = outputDll.LastWriteTimeUtc >= projectFile.LastWriteTimeUtc;
         if (isReady)
             BuildLogger.Info($"[READY] {serviceName} — build output is fresh, skipping pre-build.");
 
-        return isReady;
+        return Task.FromResult(isReady);
     }
 
     public override void Validate(string serviceName, ServiceDef def, List<string> errors)
@@ -52,7 +42,7 @@ public sealed class DotNetHandler : ServiceHandlerBase
         ServiceDef def, RegistrationContext context)
     {
         var config = def.BuildConfiguration ?? context.BuildConfiguration;
-        var dllPath = ResolveBuildOutput(def.ProjectPath!, config);
+        var dllPath = FindNewestOutputDll(def.ProjectPath!, config)?.FullName;
 
         if (dllPath is not null)
         {
@@ -82,25 +72,25 @@ public sealed class DotNetHandler : ServiceHandlerBase
     }
 
     /// <summary>
-    /// Finds the compiled DLL for a project in its bin/{config} output directory.
+    /// Finds the newest output DLL for a project. Searches bin/ (all configs) or bin/{config}/ if specified.
     /// </summary>
-    private static string? ResolveBuildOutput(string projectPath, string buildConfiguration)
+    private static FileInfo? FindNewestOutputDll(string projectPath, string? buildConfiguration = null)
     {
-        var projectFile = new FileInfo(projectPath);
-        if (!projectFile.Exists)
-            return null;
+        var projectDir = Path.GetDirectoryName(Path.GetFullPath(projectPath));
+        if (projectDir is null) return null;
 
-        var projectName = Path.GetFileNameWithoutExtension(projectPath);
-        var binDir = Path.Combine(projectFile.DirectoryName!, "bin", buildConfiguration);
+        var binDir = buildConfiguration is not null
+            ? Path.Combine(projectDir, "bin", buildConfiguration)
+            : Path.Combine(projectDir, "bin");
+
         if (!Directory.Exists(binDir))
             return null;
 
-        // Find the DLL in bin/{config}/{tfm}/ — pick the most recently written one
+        var projectName = Path.GetFileNameWithoutExtension(projectPath);
         return Directory.GetFiles(binDir, $"{projectName}.dll", SearchOption.AllDirectories)
             .Select(f => new FileInfo(f))
             .OrderByDescending(f => f.LastWriteTimeUtc)
-            .FirstOrDefault()
-            ?.FullName;
+            .FirstOrDefault();
     }
 
     public override async Task PreRunBatchAsync(

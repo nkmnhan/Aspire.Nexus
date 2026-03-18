@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 
@@ -214,7 +215,7 @@ public static class ServiceOrchestrator
         if (rebuildableServices.Count == 0)
             return;
 
-        var startedOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var startedOnce = new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
         builder.Eventing.Subscribe<BeforeResourceStartedEvent>(async (@event, ct) =>
         {
@@ -223,7 +224,7 @@ public static class ServiceOrchestrator
                 return;
 
             // Skip the first start — dependencies were already installed during pre-run phases
-            if (startedOnce.Add(resourceName))
+            if (startedOnce.TryAdd(resourceName, true))
             {
                 BuildLogger.Info($"[SKIP REBUILD] {resourceName} — already built/installed during startup.");
                 return;
